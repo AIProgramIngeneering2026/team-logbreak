@@ -1,0 +1,621 @@
+openapi: "3.0.3"
+info:
+  title: "IndieFashion Radar API"
+  version: "0.1.0"
+  description: "Контракт П2. Ошибки используют поля code, message и field. Для неизвестного пути возвращается 404 unknown_operation, для неподдерживаемого метода — 405 unknown_operation. В обоих случаях Job не создаётся. Для JSON-запросов общий лимит тела составляет 64 КиБ."
+paths:
+  "/jobs":
+    post:
+      operationId: "createJob"
+      security:
+        -
+          editorToken: []
+      description: "Проверяет источники и даты до создания Job. Ключ действует в рамках редактора. Создание и запись ключа атомарны. Повтор с тем же телом возвращает текущее состояние существующего Job, другое тело с тем же ключом даёт 409 idempotency_conflict. Тело до 64 КиБ, не более 20 различных источников. from не позже to."
+      parameters:
+        -
+          name: "Idempotency-Key"
+          in: "header"
+          required: true
+          schema:
+            type: "string"
+            minLength: 1
+            maxLength: 128
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              required:
+                - "from"
+                - "to"
+                - "sourceIds"
+              properties:
+                from:
+                  type: "string"
+                  format: "date"
+                to:
+                  type: "string"
+                  format: "date"
+                sourceIds:
+                  type: "array"
+                  items:
+                    type: "string"
+                  minItems: 1
+                  maxItems: 20
+                  uniqueItems: true
+      responses:
+        "200":
+          description: "Повтор запроса, прежний Job."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Job"
+        "202":
+          description: "Создан Job в состоянии queued."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Job"
+        "400":
+          "$ref": "#/components/responses/400"
+        "401":
+          "$ref": "#/components/responses/401"
+        "403":
+          "$ref": "#/components/responses/403"
+        "409":
+          "$ref": "#/components/responses/409"
+        "413":
+          "$ref": "#/components/responses/413"
+        "422":
+          "$ref": "#/components/responses/422"
+  "/jobs/{jobId}":
+    parameters:
+      -
+        name: "jobId"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+    get:
+      operationId: "getJob"
+      security:
+        -
+          editorToken: []
+      responses:
+        "200":
+          description: "Текущее состояние и доступность результатов."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Job"
+        "401":
+          "$ref": "#/components/responses/401"
+        "404":
+          "$ref": "#/components/responses/404"
+  "/jobs/{jobId}/cancel":
+    parameters:
+      -
+        name: "jobId"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+    post:
+      operationId: "cancelJob"
+      security:
+        -
+          editorToken: []
+      description: "Отменяет queued, collecting и processing. Новые адаптеры не стартуют, незавершённые результаты не публикуются. Терминальный Job сохраняет состояние."
+      responses:
+        "200":
+          description: "Job отменён."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Job"
+        "401":
+          "$ref": "#/components/responses/401"
+        "404":
+          "$ref": "#/components/responses/404"
+        "409":
+          "$ref": "#/components/responses/409"
+  "/jobs/{jobId}/results":
+    parameters:
+      -
+        name: "jobId"
+        in: "path"
+        required: true
+        schema:
+          type: "string"
+    get:
+      operationId: "getJobResults"
+      security:
+        -
+          editorToken: []
+      description: "Результат доступен для completed и partial. Для остальных состояний возвращается 409 job_results_unavailable."
+      responses:
+        "200":
+          description: "Карточки и ошибки по источникам."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "items"
+                  - "failures"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/FashionItem"
+                  failures:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/SourceFailure"
+        "401":
+          "$ref": "#/components/responses/401"
+        "404":
+          "$ref": "#/components/responses/404"
+        "409":
+          "$ref": "#/components/responses/409"
+  "/sources":
+    get:
+      operationId: "listSources"
+      security:
+        -
+          editorToken: []
+      responses:
+        "200":
+          description: "Доступные для сбора источники."
+          content:
+            "application/json":
+              schema:
+                type: "array"
+                items:
+                  "$ref": "#/components/schemas/Source"
+        "401":
+          "$ref": "#/components/responses/401"
+    post:
+      operationId: "addSource"
+      security:
+        -
+          editorToken: []
+      description: "Принимает только разрешённые публичные источники. Для закрытых каналов и неподдерживаемых типов или адресов даёт 422. Для сайта, запретившего автоматический доступ, даёт 403. При отказе источник, Job и материалы не создаются."
+      requestBody:
+        required: true
+        content:
+          "application/json":
+            schema:
+              type: "object"
+              required:
+                - "type"
+                - "url"
+              properties:
+                type:
+                  "$ref": "#/components/schemas/SourceType"
+                url:
+                  type: "string"
+                  format: "uri"
+      responses:
+        "201":
+          description: "Источник добавлен."
+          content:
+            "application/json":
+              schema:
+                "$ref": "#/components/schemas/Source"
+        "400":
+          "$ref": "#/components/responses/400"
+        "401":
+          "$ref": "#/components/responses/401"
+        "403":
+          "$ref": "#/components/responses/403"
+        "413":
+          "$ref": "#/components/responses/413"
+        "422":
+          "$ref": "#/components/responses/422"
+  "/items":
+    get:
+      operationId: "listItems"
+      description: "Все переданные фильтры действуют одновременно. Без фильтра цены карточки с неизвестной ценой включаются. Порядок по дате публикации и ID. Непрозрачный курсор привязан к фильтрам и снимку выдачи, повторов и пропусков между страницами этого снимка нет."
+      parameters:
+        -
+          name: "brand"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        -
+          name: "category"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        -
+          name: "material"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        -
+          name: "sourceId"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        -
+          name: "minPrice"
+          in: "query"
+          required: false
+          schema:
+            type: "number"
+            minimum: 0
+        -
+          name: "maxPrice"
+          in: "query"
+          required: false
+          schema:
+            type: "number"
+            minimum: 0
+        -
+          name: "from"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "date"
+        -
+          name: "to"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+            format: "date"
+        -
+          name: "cursor"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        -
+          name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "integer"
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: "Страница карточек, общее число совпадений и курсор следующей страницы."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "items"
+                  - "total"
+                  - "nextCursor"
+                properties:
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/FashionItem"
+                  total:
+                    type: "integer"
+                    minimum: 0
+                  nextCursor:
+                    type: "string"
+                    nullable: true
+        "422":
+          "$ref": "#/components/responses/422"
+  "/trends":
+    get:
+      operationId: "getTrends"
+      description: "Сравнивает выбранный период с предыдущим той же длительности. При недостаточной базе возвращает insufficient_baseline и не вычисляет изменение. При отсутствии карточек возвращает нулевое число и пустые списки. Пропуски атрибутов учитываются отдельно."
+      parameters:
+        -
+          name: "from"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "date"
+        -
+          name: "to"
+          in: "query"
+          required: true
+          schema:
+            type: "string"
+            format: "date"
+        -
+          name: "brands"
+          in: "query"
+          required: false
+          schema:
+            type: "array"
+            items:
+              type: "string"
+      responses:
+        "200":
+          description: "Частоты, изменения и примеры исходных публикаций."
+          content:
+            "application/json":
+              schema:
+                type: "object"
+                required:
+                  - "observations"
+                  - "previousObservations"
+                  - "insufficientBaseline"
+                  - "missingShares"
+                  - "categories"
+                  - "colors"
+                  - "materials"
+                  - "priceRanges"
+                properties:
+                  observations:
+                    type: "integer"
+                    minimum: 0
+                  previousObservations:
+                    type: "integer"
+                    minimum: 0
+                  insufficientBaseline:
+                    type: "boolean"
+                    description: "Признак insufficient_baseline при отсутствии достаточных данных для сравнения."
+                  missingShares:
+                    type: "object"
+                    additionalProperties:
+                      type: "number"
+                      minimum: 0
+                      maximum: 1
+                  categories:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TrendCount"
+                  colors:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TrendCount"
+                  materials:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TrendCount"
+                  priceRanges:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TrendCount"
+        "422":
+          "$ref": "#/components/responses/422"
+components:
+  securitySchemes:
+    editorToken:
+      type: "http"
+      scheme: "bearer"
+  schemas:
+    SourceType:
+      type: "string"
+      enum:
+        - "telegram"
+        - "website"
+    Source:
+      type: "object"
+      required:
+        - "id"
+        - "type"
+        - "url"
+      properties:
+        id:
+          type: "string"
+        type:
+          "$ref": "#/components/schemas/SourceType"
+        url:
+          type: "string"
+          format: "uri"
+    Job:
+      type: "object"
+      required:
+        - "id"
+        - "status"
+        - "failureCode"
+        - "resultUrl"
+        - "failures"
+      properties:
+        id:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "created"
+            - "queued"
+            - "collecting"
+            - "processing"
+            - "completed"
+            - "partial"
+            - "failed"
+            - "cancelled"
+        failureCode:
+          type: "string"
+          nullable: true
+          description: "Например, job_interrupted после перезапуска."
+        resultUrl:
+          type: "string"
+          nullable: true
+        failures:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/SourceFailure"
+    SourceFailure:
+      type: "object"
+      required:
+        - "sourceId"
+        - "code"
+      properties:
+        sourceId:
+          type: "string"
+        code:
+          type: "string"
+          enum:
+            - "source_timeout"
+            - "source_rate_limited"
+            - "invalid_source_response"
+            - "source_unavailable"
+            - "collection_not_allowed"
+    FashionItem:
+      type: "object"
+      required:
+        - "id"
+        - "brand"
+        - "sourceType"
+        - "publishedAt"
+        - "originalUrl"
+      properties:
+        id:
+          type: "string"
+        brand:
+          type: "string"
+        sourceType:
+          "$ref": "#/components/schemas/SourceType"
+        publishedAt:
+          type: "string"
+          format: "date-time"
+        originalUrl:
+          type: "string"
+          format: "uri"
+        originUrls:
+          type: "array"
+          items:
+            type: "string"
+            format: "uri"
+          minItems: 1
+        category:
+          type: "string"
+          nullable: true
+        color:
+          type: "string"
+          nullable: true
+        material:
+          type: "string"
+          nullable: true
+        price:
+          type: "number"
+          minimum: 0
+          nullable: true
+          description: "Цена в рублях."
+    TrendCount:
+      type: "object"
+      required:
+        - "value"
+        - "count"
+        - "change"
+        - "exampleUrls"
+      properties:
+        value:
+          type: "string"
+        count:
+          type: "integer"
+          minimum: 0
+        change:
+          type: "integer"
+          nullable: true
+        exampleUrls:
+          type: "array"
+          items:
+            type: "string"
+            format: "uri"
+    Error:
+      type: "object"
+      required:
+        - "code"
+        - "message"
+        - "field"
+      properties:
+        code:
+          type: "string"
+        message:
+          type: "string"
+        field:
+          type: "string"
+          nullable: true
+          description: "Путь к полю запроса или null, если ошибка не относится к полю."
+  responses:
+    "400":
+      description: "Синтаксически некорректный JSON."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "invalid_json"
+            message: "Синтаксически некорректный JSON."
+            field: null
+    "401":
+      description: "Требуется токен редактора."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "authentication_required"
+            message: "Требуется токен редактора."
+            field: null
+    "403":
+      description: "Сбор для источника запрещён."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "collection_not_allowed"
+            message: "Сбор для источника запрещён."
+            field: "url"
+    "404":
+      description: "Задание не найдено."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "job_not_found"
+            message: "Задание не найдено."
+            field: null
+    "405":
+      description: "Операция не поддерживается."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "unknown_operation"
+            message: "Операция не поддерживается."
+            field: null
+    "409":
+      description: "Повтор с другим телом, отмена терминального Job (job_not_cancellable) или результат недоступен (job_results_unavailable)."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "idempotency_conflict"
+            message: "Повтор с другим телом, отмена терминального Job (job_not_cancellable) или результат недоступен (job_results_unavailable)."
+            field: null
+    "413":
+      description: "Тело запроса превышает 64 КиБ."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "payload_too_large"
+            message: "Тело запроса превышает 64 КиБ."
+            field: null
+    "422":
+      description: "Некорректное поле, закрытый канал (private_source_not_allowed) или неподдерживаемый источник (unsupported_source)."
+      content:
+        "application/json":
+          schema:
+            "$ref": "#/components/schemas/Error"
+          example:
+            code: "validation_error"
+            message: "Некорректное поле, закрытый канал (private_source_not_allowed) или неподдерживаемый источник (unsupported_source)."
+            field: "from"
