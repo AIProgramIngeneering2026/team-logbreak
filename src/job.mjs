@@ -5,6 +5,8 @@ const transitions = new Map([
   ['processing', ['completed', 'partial', 'failed', 'cancelled']],
 ]);
 
+const terminalStates = new Set(['completed', 'partial', 'failed', 'cancelled']);
+
 export class CollectionJob {
   #status = 'created';
   #result = null;
@@ -65,8 +67,6 @@ export class CollectionJob {
     this.#status = next;
   }
 }
-
-const terminalStates = new Set(['completed', 'partial', 'failed', 'cancelled']);
 
 export function recoverInterruptedJobs(jobs) {
   for (const job of jobs) {
