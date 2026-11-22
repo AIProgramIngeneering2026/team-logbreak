@@ -3,6 +3,7 @@ import test from 'node:test';
 import { CollectionJob, recoverInterruptedJobs } from '../src/job.mjs';
 import { Registry } from '../src/registry.mjs';
 import { Dispatcher } from '../src/dispatcher.mjs';
+import { normalizePublications } from '../src/normalize.mjs';
 import { telegramChannelTool } from '../src/telegram-tool.mjs';
 import { websiteTool } from '../src/website-tool.mjs';
 import { toolError } from '../src/tool.mjs';
@@ -16,11 +17,11 @@ const page = { records: [], nextCursor: null, observedAt: publishedAt };
 const request = { sourceIds: ['telegram'], from, to };
 const transitionError = { code: 'invalid_state_transition' };
 
-function setup(tools, sources = [telegram, website]) {
+function setup(tools, sources = [telegram, website], onUnexpectedError = () => {}) {
   const registry = new Registry(tools);
   const dispatcher = new Dispatcher(registry, {
     findSource: (id) => sources.find((source) => source.id === id),
-    onUnexpectedError() {},
+    onUnexpectedError,
   });
   const job = new CollectionJob('job-1');
   assert.equal(job.status, 'created');
@@ -104,6 +105,37 @@ test('З3 — отмена во время Tool блокирует запозд�
   assert.equal(job.status, 'cancelled');
   assert.equal(job.result, null);
   assert.equal(calls, 0);
+});
+
+test('З3 — отмена на второй странице отбрасывает её данные и блокирует третью', async () => {
+  const startedSecond = Promise.withResolvers();
+  const pendingSecond = Promise.withResolvers();
+  const cursors = [];
+  const publication = {
+    externalId: 'first', publishedAt, originalUrl: telegram.url, text: null, attributes: { brand: 'Line' },
+  };
+  const { dispatcher, job } = setup([{
+    sourceType: 'telegram',
+    collect({ cursor }) {
+      cursors.push(cursor);
+      if (cursor === null) return { ...page, records: [publication], nextCursor: 'second' };
+      if (cursor === 'second') {
+        startedSecond.resolve();
+        return pendingSecond.promise;
+      }
+      assert.fail('Третья страница не должна запрашиваться');
+    },
+  }]);
+  const running = dispatcher.run(job, request);
+  await startedSecond.promise;
+  job.cancel();
+  pendingSecond.resolve({
+    ...page, records: [{ ...publication, externalId: 'late' }], nextCursor: 'third',
+  });
+  await running;
+  assert.equal(job.status, 'cancelled');
+  assert.equal(job.result, null);
+  assert.deepEqual(cursors, [null, 'second']);
 });
 
 test('З4 — после ошибки Job не публикует успешный результат', () => {
@@ -205,4 +237,43 @@ test('повтор курсора завершает источник ошибк
   await dispatcher.run(job, request);
   assert.equal(job.status, 'failed');
   assert.equal(job.result.sourceFailures[0].code, 'invalid_source_response');
+});
+
+test('дедупликация различает пару идентификаторов даже с разделителем внутри', () => {
+  const first = {
+    source: { ...telegram, id: 'catalog|brand' },
+    record: { externalId: 'item', attributes: { brand: 'First' } },
+  };
+  const second = {
+    source: { ...telegram, id: 'catalog' },
+    record: { externalId: 'brand|item', attributes: { brand: 'Second' } },
+  };
+  const items = normalizePublications([first, second, first]);
+  assert.deepEqual(items.map(({ id }) => id), [
+    '["catalog|brand","item"]',
+    '["catalog","brand|item"]',
+  ]);
+});
+
+test('ошибка нормализации передаётся в мониторинг, а Job получает безопасный код', async () => {
+  const error = new RangeError('internal normalization detail');
+  const record = {
+    externalId: 'broken',
+    publishedAt,
+    originalUrl: telegram.url,
+    text: null,
+    attributes: { get brand() { throw error; } },
+  };
+  const logged = [];
+  const { dispatcher, job } = setup([{
+    sourceType: 'telegram',
+    collect: () => ({ ...page, records: [record] }),
+  }], [telegram], (...entry) => logged.push(entry));
+
+  await dispatcher.run(job, request);
+
+  assert.equal(job.status, 'failed');
+  assert.deepEqual(job.result, { code: 'invalid_source_response', items: [], sourceFailures: [] });
+  assert.deepEqual(logged, [['Сбой нормализации публикаций', job.id, error]]);
+  assert.equal(logged[0][2], error);
 });

@@ -1,9 +1,13 @@
 export function normalizePublications(publications) {
   const items = [];
-  const seen = new Set();
+  const seenBySource = new Map();
   for (const { source, record } of publications) {
-    const id = JSON.stringify([source.id, record.externalId]);
-    if (seen.has(id)) continue;
+    let seen = seenBySource.get(source.id);
+    if (!seen) {
+      seen = new Set();
+      seenBySource.set(source.id, seen);
+    }
+    if (seen.has(record.externalId)) continue;
 
     const { brand, category, color, material, price } = record.attributes;
     if (typeof brand !== 'string' || !brand.trim()) {
@@ -12,9 +16,9 @@ export function normalizePublications(publications) {
     if (price != null && (!Number.isFinite(price) || price < 0)) {
       throw new TypeError('price must be a non-negative number');
     }
-    seen.add(id);
+    seen.add(record.externalId);
     items.push({
-      id,
+      id: JSON.stringify([source.id, record.externalId]),
       brand: brand.trim(),
       category: optionalText(category),
       color: optionalText(color),

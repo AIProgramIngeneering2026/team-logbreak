@@ -61,8 +61,9 @@ export class Dispatcher {
       let items;
       try {
         items = normalizePublications(publications);
-      } catch {
+      } catch (error) {
         job.fail({ code: 'invalid_source_response', items: [], sourceFailures });
+        this.onUnexpectedError('Сбой нормализации публикаций', context.requestId, error);
         return;
       }
       job.finish({ items, sourceFailures });
