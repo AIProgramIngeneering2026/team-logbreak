@@ -36,6 +36,18 @@ for (const type of ['telegram', 'website']) {
     assert.ok(first.nextCursor.length > 0);
     const request = { ...initial, cursor: first.nextCursor };
 
+    await t.test('повреждённый курсор отклоняется', async () => {
+      const readsBefore = reads;
+      const result = await tool.collect({
+        ...request,
+        cursor: `${first.nextCursor}broken`,
+      }, context);
+
+      assert.equal(result.code, 'invalid_tool_request');
+      assert.equal(result.field, 'cursor');
+      assert.equal(reads, readsBefore);
+    });
+
     const changes = [
       ['source.id', { source: { ...source, id: 'source-2' } }],
       ['source.url', { source: { ...source, url: 'https://example.org/other' } }],
