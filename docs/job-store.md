@@ -35,10 +35,34 @@ store.getJob({ editorId, jobId })
 
 ## Подключение SQLite
 
-Создайте `new SqliteJobStore(filename)` из `src/sqlite-job-store.mjs`.
-Конструктор применяет пронумерованные миграции. При запуске единственного
-worker вызовите `store.recoverInterrupted()`, затем вызывайте
-`await store.runNext(dispatcher)` для обработки очереди. Метод возвращает
-снимок обработанного Job или `null`, если очередь пуста. Даты запроса
-охватывают полные календарные дни в UTC. После остановки worker вызовите
-`store.close()`.
+Точка входа для HTTP-сервера — `src/job-store-runtime.mjs`. Экспорт
+`createStore({ databasePath })` применяет миграции, восстанавливает
+прерванные Job и запускает одного фонового обработчика очереди.
+`await store.close()` останавливает обработчик после текущего Job и закрывает
+соединение. Источники для прототипа читаются из локальных снимков.
+
+Для общего запуска задайте `JOB_STORE_MODULE=./src/job-store-runtime.mjs` и
+`JOB_SOURCES_FILE` с путём к JSON-файлу снимков. `ALLOWED_SOURCE_IDS`
+должен содержать идентификаторы из этого файла. Пример файла:
+
+```json
+[
+  {
+    "id": "website",
+    "type": "website",
+    "url": "https://example.com/",
+    "entries": [
+      {
+        "canonicalUrl": "https://example.com/collection",
+        "publishedAt": "2026-11-28T21:00:00Z",
+        "attributes": { "brand": "Brand" }
+      }
+    ]
+  }
+]
+```
+
+Для `telegram` элементы `entries` содержат `messageId`, `date`,
+`publicUrl` и `attributes`. Для тестов список источников можно передать
+в `createStore` напрямую. Даты запроса охватывают полные календарные дни в
+UTC. HTTP-слой отвечает за проверку токенов и доступность источников.
