@@ -7,6 +7,7 @@ paths:
   "/jobs":
     post:
       operationId: "createJob"
+      x-implemented-in-p4: true
       security:
         -
           editorToken: []
@@ -30,6 +31,7 @@ paths:
                 - "from"
                 - "to"
                 - "sourceIds"
+              additionalProperties: false
               properties:
                 from:
                   type: "string"
@@ -67,6 +69,12 @@ paths:
           "$ref": "#/components/responses/409"
         "413":
           "$ref": "#/components/responses/413"
+        "415":
+          "$ref": "#/components/responses/415"
+        "405":
+          "$ref": "#/components/responses/405"
+        "500":
+          "$ref": "#/components/responses/500"
         "422":
           "$ref": "#/components/responses/422"
   "/jobs/{jobId}":
@@ -79,6 +87,7 @@ paths:
           type: "string"
     get:
       operationId: "getJob"
+      x-implemented-in-p4: true
       security:
         -
           editorToken: []
@@ -93,6 +102,8 @@ paths:
           "$ref": "#/components/responses/401"
         "404":
           "$ref": "#/components/responses/404"
+        "500":
+          "$ref": "#/components/responses/500"
   "/jobs/{jobId}/cancel":
     parameters:
       -
@@ -130,6 +141,7 @@ paths:
           type: "string"
     get:
       operationId: "getJobResults"
+      x-implemented-in-p4: true
       security:
         -
           editorToken: []
@@ -159,6 +171,8 @@ paths:
           "$ref": "#/components/responses/404"
         "409":
           "$ref": "#/components/responses/409"
+        "500":
+          "$ref": "#/components/responses/500"
   "/sources":
     get:
       operationId: "listSources"
@@ -461,6 +475,8 @@ components:
             - "invalid_source_response"
             - "source_unavailable"
             - "collection_not_allowed"
+            - "unknown_operation"
+            - "invalid_tool_request"
     FashionItem:
       type: "object"
       required:
@@ -549,6 +565,18 @@ components:
             code: "invalid_json"
             message: "Синтаксически некорректный JSON."
             field: null
+    "415":
+      description: "Тип содержимого должен быть application/json."
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
+    "500":
+      description: "Внутренняя ошибка без трассы, SQL и путей."
+      content:
+        application/json:
+          schema:
+            "$ref": "#/components/schemas/Error"
     "401":
       description: "Требуется токен редактора."
       content:

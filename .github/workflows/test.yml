@@ -18,4 +18,6 @@ jobs:
         with:
           node-version: '22'
       - name: Run domain core tests
-        run: node --test
+        run: |
+          npm ci --ignore-scripts
+          node --test
