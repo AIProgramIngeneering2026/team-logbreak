@@ -316,6 +316,63 @@ test('OpenAPI: схема создания принимает обычный з�
   assert.equal(validate({ ...body, from: '2026-02-30' }), false);
 });
 
+test('HTTP: повторяющийся Idempotency-Key отклоняется до создания Job', async (t) => {
+  const { url, store } = await setup(t);
+  for (const keys of [['same', 'same'], ['first', 'second']]) {
+    const response = await new Promise((resolve, reject) => {
+      const request = httpRequest(url + '/jobs', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer token-a',
+          'content-type': 'application/json',
+          'idempotency-key': keys,
+        },
+      }, (result) => {
+        const chunks = [];
+        result.on('data', (chunk) => chunks.push(chunk));
+        result.on('error', reject);
+        result.on('end', () => resolve({
+          status: result.statusCode,
+          value: JSON.parse(Buffer.concat(chunks).toString()),
+        }));
+      });
+      request.on('error', reject);
+      request.end(JSON.stringify(body));
+    });
+    assertError(response, 422, 'validation_error', 'Idempotency-Key');
+  }
+  assert.equal(store.createCalls, 0);
+  assert.equal(store.jobs.size, 0);
+});
+
+test('Ошибка запуска на занятом порту закрывает store до возврата ошибки', async (t) => {
+  const { url } = await setup(t);
+  const store = memoryStore();
+  let closes = 0;
+  let closed = false;
+  store.close = async () => {
+    closes++;
+    await new Promise((resolve) => setImmediate(resolve));
+    closed = true;
+  };
+  await assert.rejects(startServer({
+    store, tokens: { 'test-token': 'editor-a' }, allowedSourceIds: ['telegram'],
+    port: Number(new URL(url).port),
+  }), { code: 'EADDRINUSE' });
+  assert.equal(closes, 1);
+  assert.equal(closed, true);
+});
+
+test('Ошибка конфигурации HTTP также закрывает уже созданный store', async () => {
+  const store = memoryStore();
+  let closes = 0;
+  store.close = async () => { closes++; };
+  await assert.rejects(startServer({
+    store, tokens: {}, allowedSourceIds: ['telegram'], port: 0,
+  }), TypeError);
+  assert.equal(closes, 1);
+});
+
 test('Запуск HTTP с готовым store и конфигурацией редакторов', async (t) => {
   const server = await startServer({
     store: memoryStore(), tokens: { 'local-test-token': 'editor-a' },

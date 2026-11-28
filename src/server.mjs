@@ -14,14 +14,23 @@ export async function startServer({
   host = '127.0.0.1',
   onError = console.error,
 }) {
-  const server = createApiServer({
-    store, authenticate: tokenAuthenticator(tokens), allowedSourceIds, onError,
-  });
-  await new Promise((ready, reject) => {
-    server.once('error', reject);
-    server.listen(port, host, ready);
-  });
-  return server;
+  try {
+    const server = createApiServer({
+      store, authenticate: tokenAuthenticator(tokens), allowedSourceIds, onError,
+    });
+    await new Promise((ready, reject) => {
+      server.once('error', reject);
+      server.listen(port, host, ready);
+    });
+    return server;
+  } catch (error) {
+    try {
+      await store.close?.();
+    } catch (closeError) {
+      throw new AggregateError([error, closeError], 'Server startup and store cleanup failed');
+    }
+    throw error;
+  }
 }
 
 async function main() {

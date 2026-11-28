@@ -165,8 +165,9 @@ export function createApiServer({ store, authenticate, allowedSourceIds, onError
         throw new ApiError(401, 'authentication_required', 'Требуется токен редактора');
       }
       if (isCreation) {
-        const idempotencyKey = request.headers['idempotency-key'];
-        if (typeof idempotencyKey !== 'string' || !idempotencyKey.trim()
+        const keys = request.headersDistinct['idempotency-key'] ?? [];
+        const [idempotencyKey] = keys;
+        if (keys.length !== 1 || typeof idempotencyKey !== 'string' || !idempotencyKey.trim()
           || idempotencyKey.length > 128) {
           throw invalid('Idempotency-Key', 'Нужен ключ длиной от 1 до 128 символов');
         }
