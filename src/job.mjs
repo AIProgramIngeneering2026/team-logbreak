@@ -1,3 +1,5 @@
+export class JobPersistenceError extends Error {}
+
 const transitions = new Map([
   ['created', ['queued']],
   ['queued', ['collecting', 'cancelled']],
@@ -11,6 +13,7 @@ export class CollectionJob {
   #status = 'created';
   #result = null;
   #controller = new AbortController();
+  #saveTransition;
 
   constructor(id) {
     if (typeof id !== 'string' || !id.trim()) {
@@ -19,11 +22,12 @@ export class CollectionJob {
     Object.defineProperty(this, 'id', { value: id, enumerable: true });
   }
 
-  static restore({ id, status, result }) {
+  static restore({ id, status, result }, { saveTransition } = {}) {
     if (!transitions.has(status) && !terminalStates.has(status)) {
       throw new TypeError('Unknown Job status in snapshot');
     }
     const job = new CollectionJob(id);
+    job.#saveTransition = saveTransition;
     job.#status = status;
     job.#result = structuredClone(result);
     if (status === 'cancelled' || status === 'failed') job.#controller.abort();
@@ -62,8 +66,16 @@ export class CollectionJob {
         to: next,
       });
     }
-    // Commit the state and its result synchronously before any observer can cancel.
-    this.#result = structuredClone(result);
+    const nextResult = structuredClone(result);
+    // Persist before exposing a transition to callers.
+    if (this.#saveTransition) {
+      try {
+        this.#saveTransition({ id: this.id, status: next, result: nextResult }, this.#status);
+      } catch (cause) {
+        throw new JobPersistenceError('Failed to persist Job transition', { cause });
+      }
+    }
+    this.#result = nextResult;
     this.#status = next;
   }
 }

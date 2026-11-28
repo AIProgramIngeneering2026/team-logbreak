@@ -1,3 +1,4 @@
+import { JobPersistenceError } from './job.mjs';
 import { setTimeout as delay } from 'node:timers/promises';
 import { isDateTime, isPublication, toolError } from './tool.mjs';
 import { normalizePublications } from './normalize.mjs';
@@ -68,6 +69,7 @@ export class Dispatcher {
       }
       job.finish({ items, sourceFailures });
     } catch (error) {
+      if (error instanceof JobPersistenceError) throw error;
       if (job.signal.aborted) return;
       job.fail({ code: 'source_unavailable', items: [], sourceFailures });
       throw error;
